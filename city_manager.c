@@ -80,7 +80,7 @@ int main(int argc, char *argv[]) {
     for (int i = 1; i < argc; i++) {
 
         if (strcmp(argv[i], "--role") == 0) {
-            if (i + 1 >= argc) { fprintf(stderr, "Error: --role requires a value\n"); return 1; }
+            if (i + 1 >= argc) { fprintf(stderr, "Main_Error: --role requires a value\n"); return 1; }
             role = argv[++i];
 
         } else if (strcmp(argv[i], "--user") == 0) {
@@ -89,35 +89,35 @@ int main(int argc, char *argv[]) {
 
         } else if (strcmp(argv[i], "--add") == 0) {
             command = "add";
-            if (i + 1 >= argc) { fprintf(stderr, "Error: --add requires a district\n"); return 1; }
+            if (i + 1 >= argc) { fprintf(stderr, "Main_Error: --add requires a district\n"); return 1; }
             district = argv[++i];
 
         } else if (strcmp(argv[i], "--list") == 0) {
             command = "list";
-            if (i + 1 >= argc) { fprintf(stderr, "Error: --list requires a district\n"); return 1; }
+            if (i + 1 >= argc) { fprintf(stderr, "Main_Error: --list requires a district\n"); return 1; }
             district = argv[++i];
 
         } else if (strcmp(argv[i], "--view") == 0) {
             command = "view";
-            if (i + 2 >= argc) { fprintf(stderr, "Error: --view requires a district and report ID\n"); return 1; }
+            if (i + 2 >= argc) { fprintf(stderr, "Main_Error: --view requires a district and report ID\n"); return 1; }
             district  = argv[++i];
             report_id = atoi(argv[++i]);
 
         } else if (strcmp(argv[i], "--remove_report") == 0) {
             command = "remove_report";
-            if (i + 2 >= argc) { fprintf(stderr, "Error: --remove_report requires a district and report ID\n"); return 1; }
+            if (i + 2 >= argc) { fprintf(stderr, "Main_Error: --remove_report requires a district and report ID\n"); return 1; }
             district  = argv[++i];
             report_id = atoi(argv[++i]);
 
         } else if (strcmp(argv[i], "--update_threshold") == 0) {
             command = "update_threshold";
-            if (i + 2 >= argc) { fprintf(stderr, "Error: --update_threshold requires a district and value\n"); return 1; }
+            if (i + 2 >= argc) { fprintf(stderr, "Main_Error: --update_threshold requires a district and value\n"); return 1; }
             district  = argv[++i];
             threshold = atoi(argv[++i]);
 
         } else if (strcmp(argv[i], "--filter") == 0) {
             command = "filter";
-            if (i + 1 >= argc) { fprintf(stderr, "Error: --filter requires a district\n"); return 1; }
+            if (i + 1 >= argc) { fprintf(stderr, "Main_Error: --filter requires a district\n"); return 1; }
             district = argv[++i];
             filter_conditions_start = i + 1;
         }
@@ -125,19 +125,19 @@ int main(int argc, char *argv[]) {
 
     // Validate all required arguments before doing anything else.
     if (!role) {
-        fprintf(stderr, "Error: --role is required (manager or inspector)\n");
+        fprintf(stderr, "Main_Error: --role is required (manager or inspector)\n");
         return 1;
     }
     if (!user) {
-        fprintf(stderr, "Error: --user is required\n");
+        fprintf(stderr, "Main_Error: --user is required\n");
         return 1;
     }
     if (strcmp(role, "manager") != 0 && strcmp(role, "inspector") != 0) {
-        fprintf(stderr, "Error: role must be 'manager' or 'inspector'\n");
+        fprintf(stderr, "Main_Error: role must be 'manager' or 'inspector'\n");
         return 1;
     }
     if (!command) {
-        fprintf(stderr, "Error: no command specified\n");
+        fprintf(stderr, "Main_Error: no command specified\n");
         fprintf(stderr, "Usage: city_manager --role <role> --user <user> --<command> <args>\n");
         return 1;
     }
@@ -174,7 +174,7 @@ void log_action(const char *district, const char *role,
     //             destroy all previous log entries.
     int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (fd < 0) {
-        perror("log_action: open failed");
+        perror("log_action_error: open failed");
         return; // logging failure is not fatal — we just warn and continue
     }
 
@@ -286,7 +286,7 @@ int check_permission(const char *path, const char *role, int need_read, int need
     // st_mode which contains all the permission bits packed into one integer.
 
     if (stat(path, &st) < 0) {
-        perror("check_permission: stat failed");
+        perror("check_permission_error: stat failed");
         return 0; // If we can't stat the file, treat it as no permission.
     }
 
@@ -295,35 +295,30 @@ int check_permission(const char *path, const char *role, int need_read, int need
     if (strcmp(role, "manager") == 0) {
         // Manager maps to the owner tier — check user (owner) bits.
         if (need_read && !(mode & S_IRUSR)) {
-            fprintf(stderr, "Permission denied: manager cannot read '%s'\n", path);
+            fprintf(stderr, "check_permission_error: manager cannot read '%s'\n", path);
             return 0;
         }
         if (need_write && !(mode & S_IWUSR)) {
-            fprintf(stderr, "Permission denied: manager cannot write to '%s'\n", path);
+            fprintf(stderr, "check_permission_error: manager cannot write to '%s'\n", path);
             return 0;
         }
     } else if (strcmp(role, "inspector") == 0) {
         // Inspector maps to the group tier — check group bits.
         if (need_read && !(mode & S_IRGRP)) {
-            fprintf(stderr, "Permission denied: inspector cannot read '%s'\n", path);
+            fprintf(stderr, "check_permission_error: inspector cannot read '%s'\n", path);
             return 0;
         }
         if (need_write && !(mode & S_IWGRP)) {
-            fprintf(stderr, "Permission denied: inspector cannot write to '%s'\n", path);
+            fprintf(stderr, "check_permission_error: inspector cannot write to '%s'\n", path);
             return 0;
         }
     } else {
-        fprintf(stderr, "Permission denied: unknown role '%s'\n", role);
+        fprintf(stderr, "check_permission_error: unknown role '%s'\n", role);
         return 0;
     }
 
     return 1; // All required permissions are present
 }
-
-// ===========================================================================
-// HELPER FUNCTIONS FOR CMD_ADD
-// ===========================================================================
-
 
 // ---------------------------------------------------------------------------
 // get_next_id: returns the ID that the next new report should receive.
@@ -339,7 +334,7 @@ int get_next_id(const char *district) {
 
     struct stat st;
     if (stat(path, &st) < 0) {
-        perror("get_next_id: stat failed");
+        perror("get_next_id_error: stat failed");
         return -1; // Return -1 on error — caller should check for this.
     }
 
@@ -347,6 +342,7 @@ int get_next_id(const char *district) {
     int next_id = file_size / sizeof(Report);
     return next_id;
 }
+
 
 // ===========================================================================
 //                                CMD_ADD
@@ -419,7 +415,7 @@ void cmd_add(const char *role, const char *user, const char *district) {
     // Each write() call appends exactly one record after all existing ones.
     int fd = open(reports_path, O_WRONLY | O_APPEND);
     if (fd < 0) {
-        perror("cmd_add: could not open reports.dat");
+        perror("cmd_add_error: could not open reports.dat");
         return;
     }
 
@@ -429,7 +425,7 @@ void cmd_add(const char *role, const char *user, const char *district) {
     // offset N * sizeof(Report). This is what makes random access possible.
     ssize_t bytes_written = write(fd, &new_report, sizeof(Report));
     if (bytes_written != (ssize_t)sizeof(Report)) {
-        perror("cmd_add: write failed or was incomplete");
+        perror("cmd_add_error: write failed or was incomplete");
         close(fd);
         return;
     } 
@@ -514,7 +510,7 @@ void cmd_list(const char *role, const char *user, const char *district) {
     // stat() gives us st_size (bytes), st_mode (permissions), and st_mtime (last modified time).
     struct stat st;
     if (stat(reports_path, &st) < 0) {
-        perror("cmd_list: stat failed on reports.dat");
+        perror("cmd_list_error: stat failed on reports.dat");
         return;
     }
 
@@ -570,7 +566,7 @@ void cmd_list(const char *role, const char *user, const char *district) {
         }
 
         printf("\t|%-3d| %-16s| %-10.6f| %-11.6f| %-15s| %-9s| %-20s|\n",
-                report.id, report.inspector, report.latitude, report.longitude,
+                count, report.inspector, report.latitude, report.longitude,
                 report.category, severity_label, time_str);
         
         //We make it pretty :D
@@ -593,27 +589,210 @@ void cmd_list(const char *role, const char *user, const char *district) {
         return;
     } else {
         printf("\t|===|=================|===========|============|================|==========|=====================|\n");
-        printf("\n\n\n\n===--------===--------===--------===--------=== End of reports (total: %d) ===--------===--------===--------===--------===\n", count);
+        printf("\n\n\n\n===--------===--------===--------===--------=== End of reports (total: %d) ===--------===--------===--------===--------===\n\n", count);
         close(fd);
     }
 
     log_action(district, role, user, "listed_reports");
 }
 
+// ===========================================================================
+//                                CMD_VIEW
+// ===========================================================================
+
 void cmd_view(const char *role, const char *user, const char *district, int report_id) {
     ensure_district_exists(district, role, user);
-    printf("[TODO] view report %d in district: %s\n", report_id, district);
+    
+    char reports_path[512];
+    BUILD_PATH(reports_path, district, "reports.dat");
+
+    //Both roles can read reports.dat, but we can check the bits explicitly to be sure,
+    //since the spec requires a stat() check before every operation.
+    if(!check_permission(reports_path, role, 1, 0)) {
+        return; // Permission check failed — error message already printed.
+    }
+
+    // Make sure the report ID is not negative before we do any math with it.
+    if (report_id < 0) {
+        fprintf(stderr, "cmd_view_error: report ID cannot be negative\n");
+        return;
+    }
+
+    int fd = open(reports_path, O_RDONLY);
+    if (fd < 0) {
+        perror("cmd_view_error: could not open reports.dat");
+        return;
+    }
+    
+    // lseek(fd, offset, SEEK_SET) moves the file cursor to an exact byte position.
+    // Since every record is sizeof(Report) bytes, record N starts at byte offset N
+    // Therefore, we can jump directly to the desired report without reading the whole file.
+    off_t offset = (off_t)report_id * sizeof(Report);
+    if(lseek(fd, offset, SEEK_SET) < 0) {
+        perror("cmd_view_error: lseek failed");
+        close(fd);
+        return;
+    }
+
+    //Now read exactly one record from wherever we just seeked out.
+    Report report;
+    ssize_t bytes_read = read(fd, &report, sizeof(Report));
+    close(fd);
+
+    if (bytes_read == 0) {
+        // read() returned 0 meaning the offset was at or past the end of the file.
+        // This means the report ID doesn't exist.
+        fprintf(stderr, "cmd_view_error: report ID %d does not exist (end of file reached)\n", report_id);
+        return;
+    } else if (bytes_read < 0) {
+        perror("cmd_view_error: error reading reports.dat");
+        return;
+    } else if (bytes_read != (ssize_t)sizeof(Report)) {
+        fprintf(stderr, "cmd_view_error: partial read occurred, expected %zu bytes but got %zd\n", sizeof(Report), bytes_read);
+        return;
+    }
+
+    // Format the timestamp into a human-readable string
+    char time_str[20];
+    struct tm *tm_info = localtime(&report.timestamp);
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%S", tm_info);
+
+    const char *severity_label;
+    switch (report.severity) {
+        case 1: severity_label = "minor"; break;
+        case 2: severity_label = "moderate"; break;
+        case 3: severity_label = "critical"; break;
+        default: severity_label = "unknown"; break;
+    }
+
+    // Print the full report - all fields, not just a summary.
+    printf("\n|======| District: %s | Report ID: %d |======|\n", district, report.id);
+    printf("\tInspector: %s\n", report.inspector);
+    printf("\tLatitude %.6f, Longitude %.6f\n", report.latitude, report.longitude);
+    printf("\tCategory: %s\n", report.category);
+    printf("\tSeverity: %s\n", severity_label);
+    printf("\tTimestamp: %s\n", time_str);
+    printf("\tDescription: %s\n\n", report.description);
+
+    char action_desc[256];
+    snprintf(action_desc, sizeof(action_desc), "viewed_report_id=%d", report_id);
+    log_action(district, role, user, action_desc);  
 }
+
+// ===========================================================================
+//                             CMD_REMOVE_REPORT
+// ===========================================================================
 
 void cmd_remove_report(const char *role, const char *user, const char *district, int report_id) {
     ensure_district_exists(district, role, user);
-    printf("[TODO] remove report %d from district: %s\n", report_id, district);
+    
+    //Manager role only — check write permission on reports.dat - inspectors can't remove reports.
+    if(strcmp(role, "manager") != 0) {
+        fprintf(stderr, "Permission denied: only managers can remove reports\n");
+        return;
+    }
+
+    char reports_path[512];
+    BUILD_PATH(reports_path, district, "reports.dat");
+
+    //Manager maps to owner bits - check that owner has write access.
+    if(!check_permission(reports_path, role, 0, 1)) {
+        return; // Permission check failed — error message already printed.
+    }
+
+    if(report_id < 0) {
+        fprintf(stderr, "cmd_remove_report_error: report ID cannot be negative\n");
+        return;
+    }
+
+    // We need the total number of reports to know how many records to read and rewrite when we remove one.
+    int total_reports = get_next_id(district);
+    if (total_reports < 0) {
+        fprintf(stderr, "cmd_remove_report_error: could not determine total number of reports\n");
+        return;
+    }
+
+    if(report_id >= total_reports) {
+        fprintf(stderr, "cmd_remove_report_error: report ID %d does not exist (only %d reports in file)\n", report_id, total_reports);
+        return;
+    }
+
+    // Open the file for readind AND writing without truncating it.
+    // O_RDWR allows us to read existing records and write changes back to earlier positions.
+    int fd = open(reports_path, O_RDWR);
+    if (fd < 0) {
+        perror("cmd_remove_report_error: could not open reports.dat");
+        return;
+    }
+
+    // --- Shift every record after report_id one position earlier ---
+    // We read record N+1 and write it back to position N, effectively overwriting the record we want to remove.
+    Report buffer;
+    for (int i = report_id; i < total_reports - 1; i++) {
+
+        // Seek to record N+1
+        off_t read_offset = (off_t)(i+1) * sizeof(Report);
+        if (lseek(fd, read_offset, SEEK_SET) < 0) {
+            perror("cmd_remove_report_error: lseek for read failed in reports.dat");
+            close(fd);
+            return;
+        }
+
+        // Read the record
+        if (read(fd, &buffer, sizeof(Report)) != (ssize_t)sizeof(Report)) {
+            perror("cmd_remove_report_error: could not read from reports.dat");
+            close(fd);
+            return;
+        }
+
+        // Write the record to the previous position
+        off_t write_offset = (off_t)i * sizeof(Report);
+        if (lseek(fd, write_offset, SEEK_SET) < 0) {
+            perror("cmd_remove_report_error: lseek for write failed in reports.dat");
+            close(fd);
+            return;
+        }
+
+        if (write(fd, &buffer, sizeof(Report)) != (ssize_t)sizeof(Report)) {
+            perror("cmd_remove_report_error: could not write to reports.dat");
+            close(fd);
+            return;
+        }
+    }
+
+    // --- Truncate the file to remove the now-duplicate last record ---
+    // After shifting, the last record exists twice — once in its original slot
+    // and once copied into the slot before it. ftruncate() cuts the file down
+    // to exactly (total - 1) records, removing that duplicate cleanly.
+    off_t new_size = (off_t)(total_reports - 1) * sizeof(Report);
+    if (ftruncate(fd, new_size) < 0) {
+        perror("cmd_remove_report_error: could not truncate reports.dat");
+        close(fd);
+        return;
+    }
+
+    close(fd);
+
+    printf("|===| Report ID %d removed successfully from district '%s' |===| %d report(s) remaining |===|\n", 
+            report_id, district, total_reports - 1);
+    
+    char action_desc[256];
+    snprintf(action_desc, sizeof(action_desc), "removed_report_id=%d", report_id);
+    log_action(district, role, user, action_desc);
 }
+
+// ===========================================================================
+//                             CMD_UPDATE_THRESHOLD
+// ===========================================================================
 
 void cmd_update_threshold(const char *role, const char *user, const char *district, int value) {
     ensure_district_exists(district, role, user);
     printf("[TODO] update threshold to %d in district: %s\n", value, district);
 }
+
+// ===========================================================================
+//                                 CMD_FILTER
+// ===========================================================================
 
 void cmd_filter(const char *role, const char *user, const char *district, int argc, char *argv[], int cond_start) {
     ensure_district_exists(district, role, user);
