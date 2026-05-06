@@ -51,6 +51,8 @@ typedef struct {
 // Forward declarations — the compiler needs to know these functions exist
 // before main() tries to call them.
 // ---------------------------------------------------------------------------
+int check_permission(const char *path, const char *role, int need_read, int need_write);
+int get_next_id(const char *district);
 void ensure_district_exists(const char *district, const char *role, const char *user);
 void log_action(const char *district, const char *role, const char *user, const char *action);
 void cmd_add(const char *role, const char *user, const char *district);
@@ -149,6 +151,9 @@ int main(int argc, char *argv[]) {
 
     return 0;
 }
+// ===========================================================================
+// HELPER FUNCTIONS
+// ===========================================================================
 
 
 // ---------------------------------------------------------------------------
@@ -257,17 +262,178 @@ void ensure_district_exists(const char *district, const char *role, const char *
     // Log that this district was accessed (or created for the first time).
     log_action(district, role, user, "district_initialized_or_accessed");
 }
+// ---------------------------------------------------------------------------
+// check_permission: checks whether the declared role has the required access
+// on a given file, based on the Unix permission bits stored in st_mode.
+//
+// The simulation maps roles to permission tiers like this:
+//   manager   -> owner  (user bits:  S_IRUSR, S_IWUSR)
+//   inspector -> group  (group bits: S_IRGRP, S_IWGRP)
+//
+// Pass need_read=1 if the operation needs read access, need_write=1 if it
+// needs write access. You can pass both as 1 if you need both.
+//
+// Returns 1 if the role has the required access, 0 if not.
+// Prints a clear error message before returning 0.
+// ---------------------------------------------------------------------------
+
+int check_permission(const char *path, const char *role, int need_read, int need_write) {
+    struct stat st;
+
+    // stat() fills in the st struct with metadata about the file, including
+    // st_mode which contains all the permission bits packed into one integer.
+
+    if (stat(path, &st) < 0) {
+        perror("check_permission: stat failed");
+        return 0; // If we can't stat the file, treat it as no permission.
+    }
+
+    mode_t mode = st.st_mode;
+
+    if (strcmp(role, "manager") == 0) {
+        // Manager maps to the owner tier — check user (owner) bits.
+        if (need_read && !(mode & S_IRUSR)) {
+            fprintf(stderr, "Permission denied: manager cannot read '%s'\n", path);
+            return 0;
+        }
+        if (need_write && !(mode & S_IWUSR)) {
+            fprintf(stderr, "Permission denied: manager cannot write to '%s'\n", path);
+            return 0;
+        }
+    } else if (strcmp(role, "inspector") == 0) {
+        // Inspector maps to the group tier — check group bits.
+        if (need_read && !(mode & S_IRGRP)) {
+            fprintf(stderr, "Permission denied: inspector cannot read '%s'\n", path);
+            return 0;
+        }
+        if (need_write && !(mode & S_IWGRP)) {
+            fprintf(stderr, "Permission denied: inspector cannot write to '%s'\n", path);
+            return 0;
+        }
+    } else {
+        fprintf(stderr, "Permission denied: unknown role '%s'\n", role);
+        return 0;
+    }
+
+    return 1; // All required permissions are present
+}
+
+// ---------------------------------------------------------------------------
+// get_next_id: returns the ID that the next new report should receive.
+//
+// Because every record in reports.dat is exactly sizeof(Report) bytes,
+// the number of existing records is simply: file_size / sizeof(Report).
+// The new report gets that count as its ID, giving IDs 0, 1, 2, 3, ...
+// ---------------------------------------------------------------------------
+
+int get_next_id(const char *district) {
+    char path[512];
+    BUILD_PATH(path, district, "reports.dat");
+
+    struct stat st;
+    if (stat(path, &st) < 0) {
+        perror("get_next_id: stat failed");
+        return -1; // Return -1 on error — caller should check for this.
+    }
+
+    off_t file_size = st.st_size;
+    int next_id = file_size / sizeof(Report);
+    return next_id;
+}
 
 
 // ---------------------------------------------------------------------------
-// Command stubs — each one calls ensure_district_exists first, then prints
-// a TODO message. We will fill these in one by one in the coming steps.
+// cmd_add: collects report fields from the user interactively, assembles a
+// Report struct, and appends it to reports.dat as a fixed-size binary record.
+//
+// Both roles are allowed to add reports (reports.dat is 664, so both owner
+// and group have write access). We still run the permission check explicitly
+// because the spec requires a stat() check before every operation.
 // ---------------------------------------------------------------------------
 
 void cmd_add(const char *role, const char *user, const char *district) {
     ensure_district_exists(district, role, user);
-    printf("[TODO] add report to district: %s\n", district);
+    
+
+    char reports_path[512];
+    BUILD_PATH(reports_path, district, "reports.dat");
+
+    if(!check_permission(reports_path, role, 0, 1)) {
+        return; // Permission check failed — error message already printed.
+    }
+
+
+    Report new_report;
+    memset(&new_report, 0, sizeof(Report)); // Clear the struct to start with
+    new_report.id = get_next_id(district);
+    if (new_report.id < 0) {
+        fprintf(stderr, "cmd_add: could not determine next report ID\n");
+        return;
+    }
+    new_report.timestamp = time(NULL); // Current time as Unix timestamp
+
+    //The inspector name comes from the --user argument, not user input
+    strncpy(new_report.inspector, user, NAME_LEN - 1);
+
+    printf("--- Filing new report for district '%s' ---\n", district);
+    printf("\tReport ID will be: %d\n", new_report.id);
+
+    printf("\t\tLatitude: ");
+    scanf("%lf", &new_report.latitude);
+
+    printf("\t\tLongitude: ");
+    scanf("%lf", &new_report.longitude);
+
+    //We call getchar() to consume the leftover newline after scanf, so it doesn't mess up our next fgets call.
+
+    printf("\t\tCategory (e.g. 'road', 'lighting'): ");
+    getchar(); // Consume leftover newline
+    fgets(new_report.category, CATEGORY_LEN, stdin);
+    new_report.category[strcspn(new_report.category, "\n")] = '\0'; // Remove trailing newline
+
+    printf("\t\tSeverity (1=minor, 2=moderate, 3=critical): ");
+    scanf("%d", &new_report.severity);
+
+    //Clamp severity to the valid range of 1-3
+    if (new_report.severity < 1) new_report.severity = 1;
+    if (new_report.severity > 3) new_report.severity = 3;
+
+    printf("\t\tDescription: ");
+    getchar(); // Consume leftover newline
+    fgets(new_report.description, DESC_LEN, stdin);
+    new_report.description[strcspn(new_report.description, "\n")] = '\0';
+
+    // --- Write the struct to disk ---
+    //O_WRONLY | O_APPEND: open for writing, and always write at the end of the file (append mode).
+    // Each write() call appends exactly one record after all existing ones.
+    int fd = open(reports_path, O_WRONLY | O_APPEND);
+    if (fd < 0) {
+        perror("cmd_add: could not open reports.dat");
+        return;
+    }
+
+    // write() sends exactly sizeof(Report) bytes in one call — the entire
+    // struct. Since every record is the same size, the file is a flat array
+    // of Report structs with no separators, and record N is always at byte
+    // offset N * sizeof(Report). This is what makes random access possible.
+    ssize_t bytes_written = write(fd, &new_report, sizeof(Report));
+    if (bytes_written != (ssize_t)sizeof(Report)) {
+        perror("cmd_add: write failed or was incomplete");
+        close(fd);
+        return;
+    } 
+
+    close(fd);
+
+    printf("Report %d filed successfully in district '%s'.\n", new_report.id, district);
+
+    // Log the action with the report ID included for clarity.
+    char action_desc[256];
+    snprintf(action_desc, sizeof(action_desc), "added_report_id=%d", new_report.id);
+    log_action(district, role, user, action_desc);
 }
+
+
 
 void cmd_list(const char *role, const char *user, const char *district) {
     ensure_district_exists(district, role, user);
