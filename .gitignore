@@ -1,0 +1,9 @@
+# Test district directories
+downtown/
+balcescu/
+
+# Compiled binary
+city_manager
+
+# Active report symlinks
+active_reports-*

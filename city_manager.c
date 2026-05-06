@@ -55,6 +55,7 @@ int check_permission(const char *path, const char *role, int need_read, int need
 int get_next_id(const char *district);
 void ensure_district_exists(const char *district, const char *role, const char *user);
 void log_action(const char *district, const char *role, const char *user, const char *action);
+void mode_to_string(mode_t mode, char *out);
 void cmd_add(const char *role, const char *user, const char *district);
 void cmd_list(const char *role, const char *user, const char *district);
 void cmd_view(const char *role, const char *user, const char *district, int report_id);
@@ -152,7 +153,7 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 // ===========================================================================
-// HELPER FUNCTIONS
+// GENERAL HELPER FUNCTIONS
 // ===========================================================================
 
 
@@ -262,6 +263,7 @@ void ensure_district_exists(const char *district, const char *role, const char *
     // Log that this district was accessed (or created for the first time).
     log_action(district, role, user, "district_initialized_or_accessed");
 }
+
 // ---------------------------------------------------------------------------
 // check_permission: checks whether the declared role has the required access
 // on a given file, based on the Unix permission bits stored in st_mode.
@@ -318,6 +320,11 @@ int check_permission(const char *path, const char *role, int need_read, int need
     return 1; // All required permissions are present
 }
 
+// ===========================================================================
+// HELPER FUNCTIONS FOR CMD_ADD
+// ===========================================================================
+
+
 // ---------------------------------------------------------------------------
 // get_next_id: returns the ID that the next new report should receive.
 //
@@ -340,6 +347,10 @@ int get_next_id(const char *district) {
     int next_id = file_size / sizeof(Report);
     return next_id;
 }
+
+// ===========================================================================
+//                                CMD_ADD
+// ===========================================================================
 
 
 // ---------------------------------------------------------------------------
@@ -433,11 +444,160 @@ void cmd_add(const char *role, const char *user, const char *district) {
     log_action(district, role, user, action_desc);
 }
 
+// ===========================================================================
+// HELPER FUNCTIONS FOR CMD_LIST
+// ===========================================================================
 
+// ---------------------------------------------------------------------------
+// mode_to_string: converts the 9 permission bits of a mode_t value into a
+// human-readable string like "rw-rw-r--", stored in `out`.
+//
+// `out` must point to a buffer of at least 10 bytes (9 chars + null terminator).
+//
+// How it works: st_mode packs many bits into one integer. The permission bits
+// are the lowest 9 bits, grouped in threes — owner, group, other. For each
+// position, we check the relevant bit with bitwise AND (&). If the bit is set,
+// the result is nonzero (truthy) and we write the letter. If not, we write '-'.
+//
+// The spec explicitly requires that you write this yourself rather than use
+// an external tool like stat or ls, so understand every line here.
+// ---------------------------------------------------------------------------
+
+void mode_to_string(mode_t mode, char *out) {
+    //Owner (user) bits
+    out[0] = (mode & S_IRUSR) ? 'r' : '-'; // owner read
+    out[1] = (mode & S_IWUSR) ? 'w' : '-'; // owner write
+    out[2] = (mode & S_IXUSR) ? 'x' : '-'; // owner execute
+
+    //Group bits
+    out[3] = (mode & S_IRGRP) ? 'r' : '-'; // group read
+    out[4] = (mode & S_IWGRP) ? 'w' : '-'; // group write
+    out[5] = (mode & S_IXGRP) ? 'x' : '-'; // group execute
+
+    //Other bits
+    out[6] = (mode & S_IROTH) ? 'r' : '-'; // other read
+    out[7] = (mode & S_IWOTH) ? 'w' : '-'; // other write
+    out[8] = (mode & S_IXOTH) ? 'x' : '-'; // other execute
+
+    out[9] = '\0'; // Null terminator to end the string
+}
+
+// ===========================================================================
+//                                CMD_LIST
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// cmd_list: prints a summary of every report in a district, preceded by
+// metadata about reports.dat (permissions in symbolic form, size, mtime).
+//
+// The permission string must be built by mode_to_string() — the spec forbids
+// using external tools for this conversion.
+//
+// Both roles may read reports.dat (permissions 664 — group read is set).
+// ---------------------------------------------------------------------------
 
 void cmd_list(const char *role, const char *user, const char *district) {
     ensure_district_exists(district, role, user);
-    printf("[TODO] list reports in district: %s\n", district);
+    
+
+    char reports_path[512];
+    BUILD_PATH(reports_path, district, "reports.dat");
+
+    //Both roles can read reports.dat, but we can check the bits explicitly to be sure,
+    //since the spec requires a stat() check before every operation.
+    if(!check_permission(reports_path, role, 1, 0)) {
+        return; // Permission check failed — error message already printed.
+    }
+
+
+    // --- Print file metadata ---
+    // stat() gives us st_size (bytes), st_mode (permissions), and st_mtime (last modified time).
+    struct stat st;
+    if (stat(reports_path, &st) < 0) {
+        perror("cmd_list: stat failed on reports.dat");
+        return;
+    }
+
+    // Convert the raw permission bits into a human-readable string.
+    char perm_str[10]; // 9 chars for permissions + 1 for null terminator
+    mode_to_string(st.st_mode, perm_str);
+
+    // ctime() converts st_mtime to human-readable string)
+    // It appends a '\n' at the end, which we can trim off.
+    char *mtime_str = ctime(&st.st_mtime);
+    mtime_str[strcspn(mtime_str, "\n")] = '\0';
+
+    printf("===--------===--------===--------===--------=== District: %s ===--------===--------===--------===--------===\n", district);
+    printf("reports.dat  \n");
+    printf("permissions: %s  \n", perm_str);
+    printf("size: %lld bytes  \n", (long long)st.st_size);
+    printf("last modified: %s \n\n\n", mtime_str);
+
+    // --- Read and print every report ---
+    // O_RDONLY: open for reading only, we never write during a list.
+    
+    int fd = open(reports_path, O_RDONLY);
+    if (fd < 0) {
+        perror("cmd_list: could not open reports.dat");
+        return;
+    }
+    printf("\t|===|=================|===========|============|================|==========|=====================|\n");
+    printf("\t|---|-----------------|-----------|------------|----------------|----------|---------------------|\n");
+    printf("\t|ID | Inspector       | Latitude  | Longitude  | Category       | Severity | Timestamp           |\n");
+    printf("\t|---|-----------------|-----------|------------|----------------|----------|---------------------|\n");
+    
+    Report report;
+    int count = 0;
+    ssize_t bytes_read;
+
+    // read() returns the number of bytes actually read.
+    // When the file is exhausted it returns 0 - that's our loop exit condition.
+    // We compare against sizeof(Report) to guard against partial reads.
+    while((bytes_read = read(fd, &report, sizeof(Report))) == (ssize_t)sizeof(Report)) {
+
+        // Convert the stored Unix timestamp into a human-readable format for display.
+        char time_str[20];
+        struct tm *tm_info = localtime(&report.timestamp);
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+
+        // Severity as a label instead of a number
+        const char *severity_label;
+        switch (report.severity) {
+            case 1: severity_label = "minor"; break;
+            case 2: severity_label = "moderate"; break;
+            case 3: severity_label = "critical"; break;
+            default: severity_label = "unknown"; break;
+        }
+
+        printf("\t|%-3d| %-16s| %-10.6f| %-11.6f| %-15s| %-9s| %-20s|\n",
+                report.id, report.inspector, report.latitude, report.longitude,
+                report.category, severity_label, time_str);
+        
+        //We make it pretty :D
+        int desc_len = strlen(report.description);
+        int padding  = 78 - desc_len;
+        if (padding < 0) padding = 0;
+
+        printf("\t|---|-----------------|-----------|------------|----------------|----------|---------------------|\n");
+        printf("\t||||| Description: %s%*s|\n", report.description, padding, "");
+        printf("\t|---|-----------------|-----------|------------|----------------|----------|---------------------|\n");
+        
+        count++;
+    }
+
+    //bytes_read == 0 means clean end of file - normal exit.
+    //bytes_read < 0 means an error occurred during reading.
+    if (bytes_read < 0) {
+        perror("cmd_list: error reading reports.dat");
+        close(fd);
+        return;
+    } else {
+        printf("\t|===|=================|===========|============|================|==========|=====================|\n");
+        printf("\n\n\n\n===--------===--------===--------===--------=== End of reports (total: %d) ===--------===--------===--------===--------===\n", count);
+        close(fd);
+    }
+
+    log_action(district, role, user, "listed_reports");
 }
 
 void cmd_view(const char *role, const char *user, const char *district, int report_id) {
